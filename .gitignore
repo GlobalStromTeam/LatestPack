@@ -58,3 +58,9 @@ dist-ssr
 *.sln
 *.sw?
 
+#Vibe Coding
+.claude/
+CLAUDE.md
+.agents/
+.mcp.json
+skills-lock.json

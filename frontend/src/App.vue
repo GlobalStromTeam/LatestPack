@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
+import themeOverrides from "./theme";
 </script>
 
 <template>
-  <HelloWorld />
+  <n-config-provider :theme-overrides="themeOverrides">
+    <router-view />
+  </n-config-provider>
 </template>

@@ -2,6 +2,7 @@ package seed
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"time"
 
@@ -31,5 +32,30 @@ func SeedAdminUser(repo *repository.UserRepo) error {
 		Username:     "admin",
 		PasswordHash: string(hash),
 		CreatedAt:    time.Now(),
+	})
+}
+
+func SeedLocalChannel(repo *repository.ChannelRepo) error {
+	ctx := context.Background()
+	existing, err := repo.FindByID(ctx, "ch_local")
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		return nil
+	}
+
+	configJSON, _ := json.Marshal(models.ChannelConfig{})
+	now := time.Now()
+	log.Println("Seeding local channel")
+	return repo.Create(ctx, &models.Channel{
+		ID:        "ch_local",
+		Name:      "本地存储",
+		Type:      "local",
+		Enabled:   true,
+		Weight:    0,
+		Config:    string(configJSON),
+		CreatedAt: now,
+		UpdatedAt: now,
 	})
 }

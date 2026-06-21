@@ -1,12 +1,19 @@
 package services
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"latestpack/models"
@@ -241,4 +248,113 @@ func (s *FileService) Delete(virtualPath, name string) error {
 
 	log.Printf("File delete: %s (user-requested)", fullPath)
 	return os.RemoveAll(fullPath)
+}
+
+// WalkAndHash walks the files directory concurrently and returns a map of relative path -> SHA-256 hex digest.
+func (s *FileService) WalkAndHash() (map[string]string, error) {
+	type fileResult struct {
+		relPath string
+		hash    string
+		err     error
+	}
+
+	// Collect file paths first
+	var paths []struct {
+		abs string
+		rel string
+	}
+
+	err := filepath.WalkDir(s.basePath, func(absPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(s.basePath, absPath)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, struct {
+			abs string
+			rel string
+		}{absPath, filepath.ToSlash(rel)})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk files: %w", err)
+	}
+
+	if len(paths) == 0 {
+		return map[string]string{}, nil
+	}
+
+	// Small file set: hash sequentially to avoid goroutine overhead
+	if len(paths) <= runtime.NumCPU() {
+		result := make(map[string]string, len(paths))
+		for _, p := range paths {
+			h, err := hashFile(p.abs)
+			if err != nil {
+				return nil, fmt.Errorf("hash file %s: %w", p.rel, err)
+			}
+			result[p.rel] = h
+		}
+		return result, nil
+	}
+
+	// Large file set: hash concurrently
+	workers := runtime.NumCPU()
+	jobs := make(chan int, len(paths))
+	results := make(chan fileResult, len(paths))
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				p := paths[idx]
+				h, err := hashFile(p.abs)
+				if err != nil {
+					results <- fileResult{err: err}
+					continue
+				}
+				results <- fileResult{relPath: p.rel, hash: h}
+			}
+		}()
+	}
+
+	for i := range paths {
+		jobs <- i
+	}
+	close(jobs)
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	result := make(map[string]string, len(paths))
+	for r := range results {
+		if r.err != nil {
+			return nil, fmt.Errorf("hash file %s: %w", r.relPath, r.err)
+		}
+		result[r.relPath] = r.hash
+	}
+
+	return result, nil
+}
+
+func hashFile(absPath string) (string, error) {
+	f, err := os.Open(absPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

@@ -43,3 +43,19 @@ func (r *UserRepo) Count(ctx context.Context) (int64, error) {
 	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count)
 	return count, err
 }
+
+func (r *UserRepo) UpdateUsername(ctx context.Context, oldUsername, newUsername string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE users SET username = ? WHERE username = ?",
+		newUsername, oldUsername,
+	)
+	return err
+}
+
+func (r *UserRepo) UpdatePassword(ctx context.Context, username, passwordHash string) error {
+	_, err := r.db.ExecContext(ctx,
+		"UPDATE users SET password_hash = ? WHERE username = ?",
+		passwordHash, username,
+	)
+	return err
+}

@@ -19,14 +19,19 @@ import (
 
 func SetupRouter(cfg *config.Config, repos *repository.Repositories) *gin.Engine {
 	authSvc := services.NewAuthService(repos.User, cfg.JWTSecret, cfg.JWTTTL)
-	versionSvc := services.NewVersionService(repos.Version)
-	statsSvc := services.NewStatsService(repos.Stats)
 	fileSvc := services.NewFileService(filepath.Join(cfg.DataDir, "files"))
+	archivesDir := filepath.Join(cfg.DataDir, "archives")
+	versionSvc := services.NewVersionService(repos.DB, repos.Version, repos.VersionChange, repos.VersionSnapshot, fileSvc, archivesDir)
+	statsSvc := services.NewStatsService(repos.Stats)
+	channelSvc := services.NewChannelService(repos.Channel)
+	clientSvc := services.NewClientService(repos.Version, repos.VersionChange, archivesDir)
 
 	authHandler := handlers.NewAuthHandler(authSvc)
 	dashHandler := handlers.NewDashboardHandler(versionSvc, statsSvc)
 	versionHandler := handlers.NewVersionHandler(versionSvc)
 	fileHandler := handlers.NewFileHandler(fileSvc)
+	channelHandler := handlers.NewChannelHandler(channelSvc)
+	clientHandler := handlers.NewClientHandler(clientSvc)
 
 	r := gin.Default()
 	r.MaxMultipartMemory = 32 << 20
@@ -35,6 +40,15 @@ func SetupRouter(cfg *config.Config, repos *repository.Repositories) *gin.Engine
 	api := r.Group("/api")
 	{
 		api.POST("/auth/login", middleware.RateLimitMiddleware(10, time.Minute), authHandler.Login)
+
+		// Client API — public, no auth required
+		client := api.Group("/client")
+		{
+			client.GET("/latest", clientHandler.GetLatest)
+			client.GET("/updates", clientHandler.GetUpdates)
+			client.GET("/update/download/:version", clientHandler.Download)
+			client.HEAD("/update/download/:version", clientHandler.Download)
+		}
 
 		authed := api.Group("")
 		authed.Use(middleware.AuthMiddleware(cfg.JWTSecret))
@@ -51,6 +65,14 @@ func SetupRouter(cfg *config.Config, repos *repository.Repositories) *gin.Engine
 			authed.POST("/files/upload", fileHandler.Upload)
 			authed.PUT("/files/rename", fileHandler.Rename)
 			authed.DELETE("/files", fileHandler.Delete)
+
+			authed.GET("/channels", channelHandler.List)
+			authed.POST("/channels", channelHandler.Create)
+			authed.PUT("/channels/:id", channelHandler.Update)
+			authed.DELETE("/channels/:id", channelHandler.Delete)
+
+			authed.PUT("/auth/username", authHandler.UpdateUsername)
+			authed.PUT("/auth/password", authHandler.UpdatePassword)
 		}
 	}
 

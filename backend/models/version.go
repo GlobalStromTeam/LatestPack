@@ -10,9 +10,21 @@ type Version struct {
 	CreatedAt time.Time
 }
 
+type VersionChange struct {
+	ID      int64
+	Version string
+	Action  string // "add", "modify", "delete"
+	Path    string
+}
+
 type CreateVersionRequest struct {
 	Version string   `json:"version" binding:"required"`
 	Notes   []string `json:"notes" binding:"required"`
+}
+
+type ChangeEntry struct {
+	Action string `json:"action" binding:"required"`
+	Path   string `json:"path" binding:"required"`
 }
 
 type VersionListResponse struct {
@@ -27,4 +39,21 @@ type VersionDTO struct {
 	Date    string   `json:"date"`
 	Size    string   `json:"size"`
 	Notes   []string `json:"notes"`
+}
+
+// Client API DTOs
+
+type ClientLatestResponse struct {
+	Version   string `json:"version"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+type ClientUpdateVersion struct {
+	Version   string        `json:"version"`
+	Timestamp int64         `json:"timestamp"`
+	Changes   []ChangeEntry `json:"changes"`
+}
+
+type ClientUpdatesResponse struct {
+	Versions []ClientUpdateVersion `json:"versions"`
 }

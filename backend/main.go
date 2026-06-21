@@ -34,6 +34,9 @@ func main() {
 	if err := seed.SeedAdminUser(repos.User); err != nil {
 		log.Printf("Warning: seed admin user: %v", err)
 	}
+	if err := seed.SeedLocalChannel(repos.Channel); err != nil {
+		log.Printf("Warning: seed local channel: %v", err)
+	}
 
 	r := routes.SetupRouter(cfg, repos)
 

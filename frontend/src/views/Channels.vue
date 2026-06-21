@@ -4,7 +4,6 @@ import { useMessage, useDialog } from "naive-ui";
 import { useChannelStore } from "../stores/channels";
 import type { Channel, ChannelConfig } from "../stores/channels";
 import {
-  CloudOutlined,
   AddOutlined,
   DeleteOutlined,
   EditOutlined,

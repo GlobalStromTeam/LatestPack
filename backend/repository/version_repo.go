@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"latestpack/models"
 )
@@ -79,6 +80,14 @@ func (r *VersionRepo) Create(ctx context.Context, v *models.Version) error {
 	return err
 }
 
+func (r *VersionRepo) CreateTx(ctx context.Context, tx *sql.Tx, v *models.Version) error {
+	_, err := tx.ExecContext(ctx,
+		"INSERT INTO versions (version, date, size, notes, created_at) VALUES (?, ?, ?, ?, ?)",
+		v.Version, v.Date, v.Size, v.Notes, v.CreatedAt,
+	)
+	return err
+}
+
 func (r *VersionRepo) DeleteIfLatest(ctx context.Context, version string) (bool, error) {
 	result, err := r.db.ExecContext(ctx,
 		"DELETE FROM versions WHERE version = ? AND version = (SELECT version FROM versions ORDER BY created_at DESC LIMIT 1)",
@@ -95,5 +104,24 @@ func (r *VersionRepo) Count(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM versions").Scan(&count)
 	return count, err
+}
+
+func (r *VersionRepo) FindByTimestampMs(ctx context.Context, timestampMs int64) (*models.Version, error) {
+	t := time.UnixMilli(timestampMs).UTC()
+	start := t.Add(-time.Millisecond)
+	end := t.Add(time.Millisecond)
+
+	var v models.Version
+	err := r.db.QueryRowContext(ctx,
+		"SELECT version, date, size, notes, created_at FROM versions WHERE created_at > ? AND created_at < ? LIMIT 1",
+		start, end,
+	).Scan(&v.Version, &v.Date, &v.Size, &v.Notes, &v.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &v, nil
 }
 

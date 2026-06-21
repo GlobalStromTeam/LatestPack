@@ -2,8 +2,12 @@
 import { ref, reactive } from "vue";
 import { useRouter } from "vue-router";
 import type { FormInst, FormRules } from "naive-ui";
+import { useMessage } from "naive-ui";
+import { useAuthStore } from "../stores/auth";
 
 const router = useRouter();
+const message = useMessage();
+const authStore = useAuthStore();
 const formRef = ref<FormInst | null>(null);
 const loading = ref(false);
 
@@ -26,13 +30,21 @@ const rules: FormRules = {
 };
 
 const handleLogin = () => {
-  formRef.value?.validate((errors) => {
+  formRef.value?.validate(async (errors) => {
     if (!errors) {
       loading.value = true;
-      setTimeout(() => {
-        loading.value = false;
+      try {
+        await authStore.login(model.username, model.password);
+        message.success("登录成功");
         router.push("/dashboard");
-      }, 1500);
+      } catch (err: unknown) {
+        const msg =
+          (err as { response?: { data?: { error?: string } } })?.response?.data
+            ?.error ?? "登录失败，请检查网络连接";
+        message.error(msg);
+      } finally {
+        loading.value = false;
+      }
     }
   });
 };

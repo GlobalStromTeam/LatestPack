@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, h, computed } from "vue";
+import type { Component } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { NIcon } from "naive-ui";
+import { useAuthStore } from "../stores/auth";
 import {
   HomeOutlined,
   SettingsOutlined,
@@ -9,21 +11,17 @@ import {
   AssessmentOutlined,
   SystemUpdateAltOutlined,
   FolderOutlined,
+  CloudOutlined,
 } from "@vicons/material";
 
 const router = useRouter();
 const route = useRoute();
+const authStore = useAuthStore();
 const collapsed = ref(false);
 
 function renderIcon(icon: Component) {
   return () => h(NIcon, null, { default: () => h(icon) });
 }
-
-type Component = ReturnType<typeof h> extends infer R
-  ? R extends (...args: unknown[]) => infer V
-    ? V
-    : never
-  : never;
 
 const menuOptions = [
   {
@@ -42,13 +40,19 @@ const menuOptions = [
     icon: renderIcon(FolderOutlined),
   },
   {
+    label: "渠道管理",
+    key: "channels",
+    icon: renderIcon(CloudOutlined),
+  },
+  {
     label: "数据分析",
     key: "analytics",
     icon: renderIcon(AssessmentOutlined),
   },
-];
-
-const bottomMenuOptions = [
+  {
+    type: "divider",
+    key: "d1",
+  },
   {
     label: "设置",
     key: "settings",
@@ -66,6 +70,7 @@ const activeKey = computed(() => {
   if (path === "/dashboard") return "dashboard";
   if (path.startsWith("/dashboard/versions")) return "versions";
   if (path.startsWith("/dashboard/files")) return "files";
+  if (path.startsWith("/dashboard/channels")) return "channels";
   if (path.startsWith("/dashboard/analytics")) return "analytics";
   if (path.startsWith("/dashboard/settings")) return "settings";
   return "dashboard";
@@ -73,6 +78,7 @@ const activeKey = computed(() => {
 
 function handleMenuSelect(key: string) {
   if (key === "logout") {
+    authStore.logout();
     router.push("/login");
     return;
   }
@@ -80,6 +86,7 @@ function handleMenuSelect(key: string) {
     dashboard: "/dashboard",
     versions: "/dashboard/versions",
     files: "/dashboard/files",
+    channels: "/dashboard/channels",
     analytics: "/dashboard/analytics",
     settings: "/dashboard/settings",
   };
@@ -103,14 +110,14 @@ function handleMenuSelect(key: string) {
       :native-scrollbar="false"
       class="flex flex-col"
     >
-      <div class="flex items-center h-16 px-4 border-b border-gray-100">
+      <div class="flex items-center justify-center h-16 px-4 border-b border-gray-100">
         <span
           v-if="!collapsed"
           class="text-lg font-bold tracking-wide whitespace-nowrap"
         >
           LatestPack
         </span>
-        <span v-else class="text-lg font-bold mx-auto">L</span>
+        <span v-else class="text-lg font-bold">L</span>
       </div>
 
       <div class="flex-1 py-2">
@@ -120,16 +127,6 @@ function handleMenuSelect(key: string) {
           :collapsed-icon-size="22"
           :options="menuOptions"
           :value="activeKey"
-          @update:value="handleMenuSelect"
-        />
-      </div>
-
-      <div class="border-t border-gray-100 py-2">
-        <n-menu
-          :collapsed="collapsed"
-          :collapsed-width="64"
-          :collapsed-icon-size="22"
-          :options="bottomMenuOptions"
           @update:value="handleMenuSelect"
         />
       </div>

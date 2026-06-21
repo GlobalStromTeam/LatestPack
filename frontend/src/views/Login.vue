@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, reactive } from "vue";
+import { useRouter } from "vue-router";
 import type { FormInst, FormRules } from "naive-ui";
 
+const router = useRouter();
 const formRef = ref<FormInst | null>(null);
 const loading = ref(false);
 
@@ -29,6 +31,7 @@ const handleLogin = () => {
       loading.value = true;
       setTimeout(() => {
         loading.value = false;
+        router.push("/dashboard");
       }, 1500);
     }
   });

@@ -24,7 +24,7 @@ func SetupRouter(cfg *config.Config, repos *repository.Repositories) *gin.Engine
 	versionSvc := services.NewVersionService(repos.DB, repos.Version, repos.VersionChange, repos.VersionSnapshot, fileSvc, archivesDir)
 	statsSvc := services.NewStatsService(repos.Stats)
 	channelSvc := services.NewChannelService(repos.Channel)
-	clientSvc := services.NewClientService(repos.Version, repos.VersionChange, archivesDir)
+	clientSvc := services.NewClientService(repos.Version, repos.VersionChange, archivesDir, repos.Channel)
 
 	authHandler := handlers.NewAuthHandler(authSvc)
 	dashHandler := handlers.NewDashboardHandler(versionSvc, statsSvc)

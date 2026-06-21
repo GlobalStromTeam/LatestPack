@@ -65,6 +65,10 @@ func (h *ClientHandler) Download(c *gin.Context) {
 			switch {
 			case errors.Is(err, services.ErrFileNotFound):
 				utils.Error(c, http.StatusNotFound, "File not found")
+			case errors.Is(err, services.ErrNoEnabledChannel):
+				utils.Error(c, http.StatusServiceUnavailable, "No enabled download channel")
+			case errors.Is(err, services.ErrWebDAVOpenListHeadNotSupported):
+				utils.Error(c, http.StatusMethodNotAllowed, "HEAD not supported for current channel mode")
 			default:
 				log.Printf("HEAD file error: %v", err)
 				utils.Error(c, http.StatusInternalServerError, "Internal server error")
@@ -77,6 +81,8 @@ func (h *ClientHandler) Download(c *gin.Context) {
 		switch {
 		case errors.Is(err, services.ErrFileNotFound):
 			utils.Error(c, http.StatusNotFound, "File not found")
+		case errors.Is(err, services.ErrNoEnabledChannel):
+			utils.Error(c, http.StatusServiceUnavailable, "No enabled download channel")
 		default:
 			log.Printf("Download file error: %v", err)
 			utils.Error(c, http.StatusInternalServerError, "Internal server error")

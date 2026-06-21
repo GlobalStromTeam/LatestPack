@@ -20,6 +20,7 @@ type ChannelConfig struct {
 	SecretKey string `json:"secretKey,omitempty"`
 	Bucket    string `json:"bucket,omitempty"`
 	Region    string `json:"region,omitempty"`
+	Mode      string `json:"mode,omitempty"` // "proxy" (default) or "openlist"
 }
 
 type CreateChannelRequest struct {

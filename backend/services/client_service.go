@@ -3,6 +3,7 @@ package services
 import (
 	"archive/tar"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,20 +18,27 @@ import (
 )
 
 var (
-	ErrFileNotFound = errors.New("file not found")
+	ErrFileNotFound    = errors.New("file not found")
+	ErrNoEnabledChannel = errors.New("no enabled download channel")
 )
 
 type ClientService struct {
-	versionRepo       *repository.VersionRepo
-	versionChangeRepo *repository.VersionChangeRepo
-	archivesDir       string
+	versionRepo            *repository.VersionRepo
+	versionChangeRepo      *repository.VersionChangeRepo
+	archivesDir            string
+	channelRepo            *repository.ChannelRepo
+	webdavClient           *http.Client
+	webdavClientNoRedirect *http.Client
 }
 
-func NewClientService(versionRepo *repository.VersionRepo, versionChangeRepo *repository.VersionChangeRepo, archivesDir string) *ClientService {
+func NewClientService(versionRepo *repository.VersionRepo, versionChangeRepo *repository.VersionChangeRepo, archivesDir string, channelRepo *repository.ChannelRepo) *ClientService {
 	return &ClientService{
-		versionRepo:       versionRepo,
-		versionChangeRepo: versionChangeRepo,
-		archivesDir:       archivesDir,
+		versionRepo:            versionRepo,
+		versionChangeRepo:      versionChangeRepo,
+		archivesDir:            archivesDir,
+		channelRepo:            channelRepo,
+		webdavClient:           newHTTPClient(),
+		webdavClientNoRedirect: newHTTPClientNoRedirect(),
 	}
 }
 
@@ -55,7 +63,6 @@ func (s *ClientService) GetUpdates(ctx context.Context, from string) (*models.Cl
 	if from == "" {
 		allChanges, err = s.versionChangeRepo.ListAll(ctx)
 	} else {
-		// If the from version doesn't exist in DB, fall back to returning all changes
 		existing, findErr := s.versionRepo.FindByVersion(ctx, from)
 		if findErr != nil || existing == nil {
 			allChanges, err = s.versionChangeRepo.ListAll(ctx)
@@ -96,8 +103,115 @@ func (s *ClientService) GetUpdates(ctx context.Context, from string) (*models.Cl
 	return &models.ClientUpdatesResponse{Versions: versions}, nil
 }
 
+// pickChannel returns the first enabled channel ordered by weight (lowest first).
+// Channels are already ordered by weight ASC in GetAll.
+func (s *ClientService) pickChannel(ctx context.Context) (*models.Channel, *models.ChannelConfig, error) {
+	channels, err := s.channelRepo.GetAll(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, ch := range channels {
+		if !ch.Enabled {
+			continue
+		}
+		var cfg models.ChannelConfig
+		if err := json.Unmarshal([]byte(ch.Config), &cfg); err != nil {
+			continue
+		}
+		return &ch, &cfg, nil
+	}
+
+	return nil, nil, ErrNoEnabledChannel
+}
+
+func (s *ClientService) DownloadFile(ctx context.Context, version string, relPath string, w http.ResponseWriter, r *http.Request) error {
+	ch, cfg, err := s.pickChannel(ctx)
+	if err != nil {
+		return err
+	}
+
+	switch ch.Type {
+	case "local":
+		return s.downloadLocalFile(ctx, version, relPath, w, r)
+	case "webdav":
+		webdavURL := buildWebDAVURL(*cfg, version, relPath)
+		mode := cfg.Mode
+		if mode == "" {
+			mode = "proxy"
+		}
+		if mode == "openlist" {
+			return s.downloadViaOpenList(ctx, *cfg, webdavURL, w, r)
+		}
+		return s.downloadViaProxy(ctx, *cfg, webdavURL, w, r)
+	default:
+		return ErrUnsupportedChannelType
+	}
+}
+
+func (s *ClientService) downloadLocalFile(ctx context.Context, version string, relPath string, w http.ResponseWriter, r *http.Request) error {
+	archivePath := filepath.Join(s.archivesDir, version+".tar")
+	hdr, tr, f, err := findInTar(archivePath, relPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	fileSize := hdr.Size
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
+		return s.serveRangeFromTar(hdr, tr, f, fileSize, rangeHeader, w)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, err = io.CopyN(w, tr, fileSize)
+	return err
+}
+
+func (s *ClientService) HeadFile(ctx context.Context, version string, relPath string, w http.ResponseWriter) error {
+	ch, cfg, err := s.pickChannel(ctx)
+	if err != nil {
+		return err
+	}
+
+	switch ch.Type {
+	case "local":
+		return s.headLocalFile(ctx, version, relPath, w)
+	case "webdav":
+		mode := cfg.Mode
+		if mode == "" {
+			mode = "proxy"
+		}
+		if mode == "openlist" {
+			return ErrWebDAVOpenListHeadNotSupported
+		}
+		webdavURL := buildWebDAVURL(*cfg, version, relPath)
+		return s.headWebDAVFileViaProxy(ctx, *cfg, webdavURL, w)
+	default:
+		return ErrUnsupportedChannelType
+	}
+}
+
+func (s *ClientService) headLocalFile(ctx context.Context, version string, relPath string, w http.ResponseWriter) error {
+	archivePath := filepath.Join(s.archivesDir, version+".tar")
+	hdr, _, f, err := findInTar(archivePath, relPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(hdr.Size, 10))
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.WriteHeader(http.StatusOK)
+	return nil
+}
+
 // findInTar opens a tar archive and returns a reader for the specified file entry.
-// Returns the tar header (for size/mod time) and a reader positioned at the file content.
 func findInTar(archivePath, targetPath string) (*tar.Header, *tar.Reader, *os.File, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
@@ -121,33 +235,7 @@ func findInTar(archivePath, targetPath string) (*tar.Header, *tar.Reader, *os.Fi
 	}
 }
 
-func (s *ClientService) DownloadFile(ctx context.Context, version string, relPath string, w http.ResponseWriter, r *http.Request) error {
-	archivePath := filepath.Join(s.archivesDir, version+".tar")
-	hdr, tr, f, err := findInTar(archivePath, relPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	fileSize := hdr.Size
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
-	w.Header().Set("Accept-Ranges", "bytes")
-
-	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
-		return s.serveRangeFromTar(hdr, tr, f, fileSize, rangeHeader, w)
-	}
-
-	w.WriteHeader(http.StatusOK)
-	_, err = io.CopyN(w, tr, fileSize)
-	return err
-}
-
 func (s *ClientService) serveRangeFromTar(hdr *tar.Header, tr *tar.Reader, f *os.File, fileSize int64, rangeHeader string, w http.ResponseWriter) error {
-	// We need to re-read from the tar to support Range.
-	// The tar reader is sequential, so for range requests we reopen the tar,
-	// seek to the file entry, then skip to the range start.
 	rangeSpec := strings.TrimPrefix(rangeHeader, "bytes=")
 	parts := strings.Split(rangeSpec, "-")
 	if len(parts) != 2 {
@@ -179,8 +267,6 @@ func (s *ClientService) serveRangeFromTar(hdr *tar.Header, tr *tar.Reader, f *os
 
 	contentLength := end - start + 1
 
-	// The tar reader is already positioned at the file content.
-	// Skip 'start' bytes, then copy contentLength bytes.
 	if _, err := io.CopyN(io.Discard, tr, start); err != nil {
 		return err
 	}
@@ -191,19 +277,4 @@ func (s *ClientService) serveRangeFromTar(hdr *tar.Header, tr *tar.Reader, f *os
 
 	_, err = io.CopyN(w, tr, contentLength)
 	return err
-}
-
-func (s *ClientService) HeadFile(ctx context.Context, version string, relPath string, w http.ResponseWriter) error {
-	archivePath := filepath.Join(s.archivesDir, version+".tar")
-	hdr, _, f, err := findInTar(archivePath, relPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(hdr.Size, 10))
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.WriteHeader(http.StatusOK)
-	return nil
 }

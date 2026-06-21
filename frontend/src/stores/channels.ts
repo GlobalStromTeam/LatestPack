@@ -9,6 +9,7 @@ export interface ChannelConfig {
   accessKey?: string;
   secretKey?: string;
   path?: string;
+  mode?: string;
 }
 
 export interface Channel {

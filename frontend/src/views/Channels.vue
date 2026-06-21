@@ -25,11 +25,12 @@ const formName = ref("");
 const formEnabled = ref(true);
 const formWeight = ref(50);
 
-const webdavConfig = ref<Pick<ChannelConfig, "endpoint" | "path" | "accessKey" | "secretKey">>({
+const webdavConfig = ref<Pick<ChannelConfig, "endpoint" | "path" | "accessKey" | "secretKey" | "mode">>({
   endpoint: "",
   path: "",
   accessKey: "",
   secretKey: "",
+  mode: "",
 });
 
 const s3Config = ref<Pick<ChannelConfig, "endpoint" | "bucket" | "region" | "accessKey" | "secretKey" | "path">>({
@@ -64,7 +65,7 @@ function openCreate() {
   formName.value = "";
   formEnabled.value = true;
   formWeight.value = 50;
-  webdavConfig.value = { endpoint: "", path: "", accessKey: "", secretKey: "" };
+  webdavConfig.value = { endpoint: "", path: "", accessKey: "", secretKey: "", mode: "" };
   s3Config.value = { endpoint: "", bucket: "", region: "", accessKey: "", secretKey: "", path: "" };
   showModal.value = true;
 }
@@ -81,6 +82,7 @@ function openEdit(channel: Channel) {
       path: channel.config.path ?? "",
       accessKey: channel.config.accessKey ?? "",
       secretKey: channel.config.secretKey ?? "",
+      mode: channel.config.mode ?? "",
     };
   } else if (channel.type === "s3") {
     s3Config.value = {
@@ -102,6 +104,7 @@ function buildConfig(): ChannelConfig {
       path: webdavConfig.value.path,
       accessKey: webdavConfig.value.accessKey,
       secretKey: webdavConfig.value.secretKey,
+      mode: webdavConfig.value.mode,
     };
   }
   if (formType.value === "s3") {
@@ -244,7 +247,7 @@ onMounted(() => {
                 </div>
                 <div class="text-xs text-gray-400 mt-0.5">
                   <template v-if="channel.type === 'webdav'">
-                    {{ channel.config.endpoint ?? '' }}
+                    {{ channel.config.endpoint ?? '' }}<template v-if="channel.config.mode === 'openlist'"> · OpenList</template>
                   </template>
                   <template v-else-if="channel.type === 's3'">
                     {{ channel.config.bucket ?? '' }}{{ channel.config.endpoint ? ` · ${channel.config.endpoint}` : '' }}
@@ -323,6 +326,16 @@ onMounted(() => {
           <n-input v-model:value="webdavConfig.path" placeholder="远程路径（可选）" />
           <n-input v-model:value="webdavConfig.accessKey" placeholder="用户名" />
           <n-input v-model:value="webdavConfig.secretKey" type="password" show-password-on="click" placeholder="密码" />
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="text-sm">OpenList 模式</span>
+              <div class="text-xs text-gray-400">开启后服务端获取 302 直链并重定向客户端</div>
+            </div>
+            <n-switch
+              :value="webdavConfig.mode === 'openlist'"
+              @update:value="(v: boolean) => webdavConfig.mode = v ? 'openlist' : ''"
+            />
+          </div>
         </template>
 
         <template v-if="formType === 's3'">
